@@ -1,0 +1,209 @@
+<head>
+	<meta name="mobile-web-app-capable" content="yes">
+  <title>Anti BYOD</title>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+</head>
+
+<style>
+#info {
+  display: inline-block;
+  width: 29%;
+  font-size: 20px;
+}
+
+.count {
+	font-size: 50;
+}
+.general-info {
+	margin-left: 5%;
+	font-size: 20px;
+}
+.scannedPrice {
+	font-size: 50px;
+	float: right;
+	display: inline;
+	margin-right: 5%;
+}
+</style>
+
+<center>
+<input id="shortupcfield" type="text" placeholder="Scan or type UPC">
+</center>
+
+</br>
+
+<div class="general-info">
+<p id="itemNameSpot"></p>
+</br>
+UPC: <p style="display:inline" id="itemUpcSpot"></p></br>
+<p id="scannedPrice" class="scannedPrice" onclick="setStoreNumber()">Price: ?</p>
+Item/SKU: <p style="display:inline" id="itemSkuSpot"></p></br>
+Size: NA</br>
+Dept: NA</br>
+Color: NA</br>
+Location: <p style="display:inline" id="itemLocation"></p></br>
+Online: <p id="scannedPriceOnline" style="display:inline">NA</p>
+</div>
+
+</br>
+</br>
+
+<center>
+	<div id="outer">
+
+		<div id="info">
+		<div class="count" id="BinCount">0</div>
+		
+			Bin/Back
+		</div>
+
+		<div id="info">
+		<div class="count" id="OnHandCount">0</div>
+		
+			On Hand
+		</div>
+
+		<div id="info">
+		<div class="count" id="SalesFloorCount">0</div>
+		
+			Sales Floor
+		</div>
+
+	</div>
+</br>
+</br>
+<a id="pictureLink"><img src="" id="picture" style="max-height: 300px; max-width: 80%"></a>
+</center>
+
+
+<script>
+storeList = 
+`1517-5001 N Federal Highway
+1387-3801 Turtle Creek Dr
+3858-22100 S State Road 7
+1916-5571 W Hillsboro Blvd
+2963-6001 Coral Ridge Dr
+5325-5555 W Atlantic Blvd
+1589-16205 S Military Trl
+2962-2300 W Atlantic Blvd
+1851-7900 W Mcnab Rd
+1349-3306 N University Dr
+2946-2500 W Broward
+2987-4301 S University
+3625-3001 N State Road 7
+3163-301 S State Road 7
+1511-1800 S University Drive
+1996-2551 E Hallandale Beach`;
+storeListArray = storeList.split("\n");
+field = document.getElementById("shortupcfield");
+hhhh = setInterval(function(){
+	field.value = field.value.replace(/\D/g, '');
+	if (field.value.length >= 12){
+		subUPC = field.value;
+		if (subUPC.length == 13){
+			upc_or_ean = "EAN13";
+		} else {
+			upc_or_ean = "UPC";
+		}
+		setTimeout(function(){
+			getWaltonData(upc_or_ean, field.value, storeNumber);
+			field.value = "";
+		}, 100);
+	}
+}, 100);
+
+
+getWaltonData = function(upc_or_ean, upc, storeID){
+	$.ajax({
+ 		//url: `http://leotakacs.com/walmart/proxy.php?upc=${upc}&store=${storeID}`,
+ 		url: `https://search.mobile.walmart.com/v1/products-by-code/${upc_or_ean}/${upc}?storeId=${storeID}`,
+  		jsonp: "$json",
+  		dataType: "json",
+	}).done(function(data) {
+  		fetchedData = data.data;
+  		processPart2();
+	});
+}
+
+parsePrice = function(price){
+	if (price > 1){
+		np = "$" + price/100;
+		if (np.split(".").length == 1){
+			np += ".00";
+		} else {
+			if (np.split(".")[1].length == 1){
+				np += "0";
+			}
+		}
+		return np;
+	} else {
+		return "NA";
+	}
+}
+
+processPart2 = function(){
+	anyItemHasUpdated = false;
+	currentProduct = fetchedData;
+	itemImgUrl = currentProduct.common.productImageUrl;
+	if (!itemImgUrl){
+		itemImgUrl = "https://aosa.org/wp-content/uploads/2019/04/image-placeholder-350x350.png";
+	}
+	itemProdUrl = currentProduct.common.productUrl;
+	itemStoreAvail = currentProduct.inStore.inventory;
+	itemStoreStatus = currentProduct.inStore.inventory.status;
+	itemPrice = currentProduct.inStore.price.priceInCents;
+	itemPriceFormatted = parsePrice(itemPrice);
+	if (currentProduct.online){
+		itemPriceOnline = currentProduct.online.price.priceInCents;
+	} else {
+		itemPriceOnline = "NA"
+	}
+	itemPriceOnlineFormatted = parsePrice(itemPriceOnline);
+	itemStockStatus = currentProduct.inStore.inventory.status;
+	itemName = currentProduct.common.name;
+	itemNameShort = itemName.replace(" ", "").replace("-", "").substring(0, 30);
+
+	if (currentProduct.inStore.location != undefined){
+		itemLocationOne = currentProduct.inStore.location.aisles[0];
+	} else {
+		itemLocationOne = "NA";
+	}
+
+	if (itemStockStatus == "Out of Stock") {
+		stockColor = "red";
+	} else if (itemStockStatus == "In Stock") {
+		stockColor = "green";
+	} else if (itemStockStatus == "Limited Stock") {
+		stockColor = "yellow";
+	} else {
+		stockColor = "grey";
+	}
+
+	document.getElementsByClassName("count")[1].style.color = stockColor;
+
+	document.getElementById("itemNameSpot").innerHTML = itemName;
+	document.getElementById("scannedPrice").innerHTML = itemPriceFormatted;
+	document.getElementById("scannedPriceOnline").innerHTML = itemPriceOnlineFormatted;
+	document.getElementById("itemUpcSpot").innerHTML = subUPC;
+	document.getElementById("picture").src = currentProduct.common.productImageUrl;
+	document.getElementById("pictureLink").href = currentProduct.common.productUrl;
+	document.getElementById("itemLocation").innerHTML = itemLocationOne;
+	currentProduct = "";
+}
+
+setStoreNumber = function(){
+	storeNumber = prompt("Enter store number: ");
+	localStorage.setItem("storeNumber", storeNumber);
+}
+
+storeNumber = localStorage.getItem("storeNumber");
+if (!storeNumber || storeNumber.length < 3 || storeNumber.length > 4){
+	setStoreNumber();
+}
+
+</script>

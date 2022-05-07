@@ -1,0 +1,730 @@
+
+
+<head>
+   <meta name="mobile-web-app-capable" content="yes">
+   <title>Walmart Inventory Checker</title>
+   <meta charset="utf-8">
+   <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+</head>
+<center>
+   <div id="entirePriceCheckOnly" style="display:none">
+      <div id="priceCheckOnly">  
+         <input id="shortupcfield" type="text" placeholder="Scan or type UPC">
+      </div>
+      <div id="priceCheckOnlyItemInfo">
+         Nothing
+      </div>
+   </div>
+   <div id="wholePage" style="display:none">
+   </br>
+   <img src="wic-logo.png" style="width: 40%">
+   </br>
+	</br>
+   <div>
+      <textarea id="upcs" placeholder="Enter UPCs here" rows="15" class="init-fields"></textarea>
+      </br>
+      <textarea id="storelist" placeholder="Enter store IDs here" rows="8" class="init-fields"></textarea>
+      </br>
+      <input type="text" id="interval" value="3" placeholder="Check interval (seconds)"></br>
+      </br>
+      <div class="btn-group-vertical" role="group">
+         <button class="mainbtn btn btn-primary" onclick="processData()" id="startScan">Start inventory scan</button>
+         <button class="mainbtn btn btn-secondary" onclick="showHideAdvConfig()">Show/hide advanced config</button>
+         <button class="mainbtn btn btn-secondary" onclick="loadFromServerData()">Load stores from server</button>
+         <button class="mainbtn btn btn-secondary" onclick="saveItemResults()">Download item results as HTML</button>
+      </div>
+      </br>
+      <div style="display: inline-block; text-align: left; margin-left: 20px">
+         </br>
+         <input type="checkbox" id="appendName">Append item name to UPC</input></br>
+         <input type="checkbox" id="continuousMode">Continuous mode</input></br></br>
+      </div>
+      </br>
+      <button class="mainbtn btn btn-danger" onclick="clearAndResetData()">Clear and reset saved data/config</button>
+      </br>
+      <div id="advConfigContainer" style="display:none">
+         <textarea id="advConfigField" onkeyup="executeAdvConfig()" rows="10" cols="75"></textarea>
+      </div>
+      </br>
+      <input type="text" id="filterBox" placeholder="Filter" onkeyup="filter()">
+      </br>
+      <div class="hidden">
+      	 <input type="checkbox" id="EnableStockFilters">Enable stock filters</input></br></br>
+         <input type="checkbox" id="HideOutOfStock">Hide "Out of Stock"</input></br>
+         <input type="checkbox" id="HideUnknownStock">Hide Unknown Stock</input></br>
+         </br>
+         </br>
+      </div>
+   </div>
+   <div id="itemArea" class="grid-container">
+   </div>
+   </br>
+   <textarea id="log" rows="20" style="width: 90%"></textarea>
+   </br>
+   </br>
+</center>
+
+
+<style>
+.mainbtn {
+	width: 275px;
+	min-height: 50px;
+}
+.grid-container {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  padding: 1px;
+  max-width: 99%;
+}
+
+.init-fields {
+	min-width: 300px;
+	width: 90%;
+}
+
+@media screen and (max-width: 700px) {
+	.grid-container {
+		grid-template-columns: auto;
+	}
+}
+
+.grid-item {
+  padding: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.8);
+  font-size: 18px;
+  text-align: center;
+}
+
+.item-title-text {
+	font-size: 20px;
+}
+.in-stores-text {
+	font-size: 17px;
+}
+
+</style>
+
+<script>
+$('input[type="checkbox"],input[type="text"],input[type="url"],textarea,select:not([multiple])').each(function (t) {
+    (localStorage.getItem(`local-${$(this).prop("id")}`) || localStorage.getItem(`local-${$(this).prop("name")}`)) &&
+        ($(this).is(":checkbox") ? $(this).prop("checked", !0) : $(this).is(":radio") ? $(`#${localStorage.getItem(`local-${$(this).prop("name")}`)}`).prop("checked", !0) : $(this).val(localStorage.getItem(`local-${$(this).prop("id")}`))),
+        $(this).on("click keyup keypress change focus", function () {
+            $(this).is(":checkbox")
+                ? $(this).prop("checked")
+                    ? localStorage.setItem(`local-${$(this).prop("id")}`, $(this).val())
+                    : localStorage.removeItem(`local-${$(this).prop("id")}`)
+                : $(this).is(":radio")
+                ? $(this).prop("checked") && localStorage.setItem(`local-${$(this).prop("name")}`, $(this).prop("id"))
+                : localStorage.setItem(`local-${$(this).prop("id")}`, $(this).val());
+        });
+});
+
+
+executeAdvConfig = function(){
+	eval(document.getElementById("advConfigField").value);
+}
+
+defaultAdvConfig = `sendStockUpdateEmails = false;
+sendPriceUpdateEmails = true;
+mainStoreTransitionDelayInSeconds = 5;
+upcSearchDelayInSeconds = 10;
+restartDelay = 1800000; //half hour
+`;
+
+if (document.getElementById("advConfigField").value.length < 1){
+	document.getElementById("advConfigField").value = defaultAdvConfig;
+}
+
+executeAdvConfig();
+advConfigHidden = true;
+
+emailBody = "";
+emailSubject = "Item info: ";
+function getUrlVars() {
+    var vars = {};
+    var parts = window.location.href.replace(/[?&]+([^=&]+)=([^&]*)/gi, function(m, key, value) {
+        vars[key] = value;
+    });
+    return vars;
+}
+
+clearAndResetData = function(){
+	localStorage.clear();
+	window.location.href = window.location.href;
+}
+
+function generateRandomIntegerInRange(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+showHideAdvConfig = function(){
+	if (advConfigHidden){
+		advConfigHidden	= false;
+		document.getElementById("advConfigContainer").style.display = "";
+	} else if (!advConfigHidden){
+		advConfigHidden	= true;
+		document.getElementById("advConfigContainer").style.display = "none";
+	}
+}
+
+addToUpdateEmail = function(itemNameUpdateList, itemImgUrlUpdateList, upcUpdateList, storeIdentUpdateList, newPriceUpdateList, oldPriceUpdateList, sendNow = false, isStockUpdate = false, newStockStatus = " ", oldStockStatus = " "){
+	if (sendNow){
+		holdingEmailBody = emailBody;
+		holdingEmailSubject = emailSubject;
+		emailBody = "<center><h3>";
+		emailSubject = "";
+	}
+	emailBody += `
+		<img src=${itemImgUrlUpdateList} style="max-width: 300px; max-height:300px"><br>
+		<img id="itemBarcode" width="300px" height="100px" src="http://barcode.live/barcode.php?upc=${upcUpdateList}"><br><br>
+		${itemNameUpdateList}<br>`;
+	if (isStockUpdate){
+		emailBody += `
+		<b><i><u><h2>NOW IN STOCK!!!</h2></u></i></b><br>
+		New stock status: ${newStockStatus}<br>
+		Old stock status: ${oldStockStatus}<br>
+		`;
+		emailSubject = `STOCK: `;
+	} else {
+		emailSubject = `PRICE: `;
+		emailBody += `
+		New price: ${newPriceUpdateList}<br>
+		Old price: ${oldPriceUpdateList}<br>`;
+	}
+	emailBody += `<br>
+		Item UPC: ${upcUpdateList}<br>
+		Store ID: ${storeIdentUpdateList}<br><br><br>`;
+	emailSubject += `${itemNameUpdateList} in ${storeIdentUpdateList}, `;
+	if (sendNow){
+		sendUpdateEmail();
+		emailBody = holdingEmailBody;
+		//emailSubject = holdingEmailSubject;
+	}
+}
+
+
+sendUpdateEmail = function(){
+	Email.send(
+		"leotakacsnotifications@gmail.com",
+		"leotakacsnotifications@gmail.com",
+		emailSubject,
+		emailBody,
+		"smtp.gmail.com",
+		"leotakacsnotifications@gmail.com",
+		"Pb26451690!!"
+	);
+	emailBody = "<center><h3>";
+	emailSubject = "Item info: ";
+}
+filter = function(){
+	its = document.getElementsByClassName("show-items");
+	for (m = 0; m < its.length; m++){
+		currentItem = its[m];
+		showCurrentItem = true;
+		if (document.getElementById("EnableStockFilters").checked){
+			if (document.getElementById("HideOutOfStock").checked){
+				if (currentItem.innerHTML.includes("Out of stock")){
+					showCurrentItem = false;
+				}
+			}
+			if (document.getElementById("HideUnknownStock").checked){
+				if (currentItem.innerHTML.includes("Unknown")){
+					showCurrentItem = false;
+				} 
+			}
+		}
+		if (!currentItem.innerHTML.toLowerCase().includes(document.getElementById("filterBox").value.toLowerCase())){
+			showCurrentItem = false;
+		}
+		if(showCurrentItem){
+			currentItem.style.display = "";
+		} else {
+			currentItem.style.display = "none";
+		}
+	}
+}
+
+download = function(data, filename) {
+	var file = new Blob([data], {
+		type: "text/plain;charset=utf-8"
+	});
+	if (window.navigator.msSaveOrOpenBlob) // IE10+
+		window.navigator.msSaveOrOpenBlob(file, filename);
+	else { // Others
+		var a = document.createElement("a"),
+		url = URL.createObjectURL(file);
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		setTimeout(function() {
+			document.body.removeChild(a);
+			window.URL.revokeObjectURL(url);
+		}, 1);
+	}
+};
+
+saveItemResults = function(){
+	htmlFileName = "Product-Information_"+createDateStamp(true)+".html";
+	customFileName = prompt("Enter custom name, or press OK to use the following name:\n" + htmlFileName);
+	if (customFileName.length > 1){
+		htmlFileName = customFileName + ".html";
+	}
+	download(`<head>${document.getElementsByTagName("head")[0].innerHTML}</head><style>${document.getElementsByTagName("style")[0].innerHTML}</style><div class="grid-container">`+document.getElementById("itemArea").innerHTML+"</div>", htmlFileName);
+}
+
+loadFromServerData = function(){
+	document.getElementById("storelist").value = loadFile("AutoStoreList.txt");
+}
+
+setTimeout(function() {
+    alreadyTriggered = false;
+    if (getUrlVars()["mode"] == "priceCheck") {
+    	hhhh = setInterval(function(){
+    		if (field.value.length >= 12){
+    			setTimeout(function(){
+            	field.value = field.value.replace(/\D/g, '');
+            	processDataPriceCheck();
+            	field.value = "";
+            }, 500);
+            }
+    	}, 100);
+    	document.getElementById("entirePriceCheckOnly").style.display = "";
+        if (!getUrlVars()["storeID"] && !localStorage.getItem("priceCheckStoreID")) {
+            changePriceCheckStoreID();
+        }
+        if (getUrlVars()["upc"]) {
+            document.getElementById("upcs").value = getUrlVars()["upc"];
+        } else {
+            //none
+        }
+        field = document.getElementById("shortupcfield");
+        document.addEventListener("keydown", e => {
+            if (e.keyCode == 55) {
+            	setTimeout(function(){
+            		field.focus();
+            	}, 100);
+            }
+            if (e.keyCode == 69){
+            	setTimeout(function(){
+            		field.value = field.value.replace(/\D/g, '');
+            		processDataPriceCheck();
+            	}, 100);
+            }
+        });
+        if (!localStorage.getItem("priceCheckStoreID")) {
+            document.getElementById("storelist").value = getUrlVars()["storeID"];
+            localStorage.setItem("priceCheckStoreID", getUrlVars()["storeID"]);
+        } else {
+            document.getElementById("storelist").value = localStorage.getItem("priceCheckStoreID");
+        }
+    } else {
+        document.getElementById("wholePage").style.display = "";
+    }
+}, 200)
+
+processDataPriceCheck = function(){
+	document.getElementById("upcs").value = field.value;
+	processData();
+	field.value = "";
+	field.blur();
+}
+
+changePriceCheckStoreID = function(){
+	newEnteredStoreID = prompt("Enter new store ID: ");
+	if (newEnteredStoreID){
+		localStorage.setItem("priceCheckStoreID", newEnteredStoreID);
+		document.getElementById("storelist").value = newEnteredStoreID;
+		processData();
+	}
+}
+
+
+setInterval(function(){
+	filter();
+}, 100);
+
+function getProductData(upc, storeID){
+	if (upc.length == 13){
+		upc_or_ean = "EAN13";
+	} else {
+		upc_or_ean = "UPC"
+	}
+	if (window.location.href.includes("leotakacs")){
+		dataUrl = `https://search.mobile.walmart.com/v1/products-by-code/${upc_or_ean}/${upc}?storeId=${storeID}`;
+	} else {
+		dataUrl = `http://127.0.0.1/proxy.php?store=${storeID}&upc=${upc}`;
+	}
+	$.ajax({
+ 		url: dataUrl,
+  		jsonp: "$json",
+  		dataType: "json"
+	}).done(function(data) {
+  		fetchedData = data.data;
+  		processPart2();
+	});
+}
+
+
+function getUPCsbyKeyword(keyword, storeID) {
+	upcSearchDelay = upcSearchDelayInSeconds*1000;
+    if (!keyword) {
+        keyword = prompt("Enter search keyword: ");
+    }
+    storeID = prompt("Enter store ID: ");
+    keywordArray = keyword.split(",");
+    if (storeID == ""){
+    	storeID = "";
+		for (i = 0; i < stores.length; i++){
+			storeID += stores[i].split("-")[0];
+			if (i != stores.length-1){
+				storeID += ",";
+			}
+		}
+	}
+	storeIDArray = storeID.split(",");
+	totalSearches = keywordArray.length * storeIDArray.length;
+	counter = 0;
+    for (let h = 0; h < keywordArray.length; h++) {
+        for (let f = 0; f < storeID.split(",").length; f++) {
+		    setTimeout(function(){
+		    	logThis(`Searching for "${keywordArray[h]}" in store ${storeIDArray[f]}.....`);
+		       	searchByKeywordFunc(keywordArray[h], storeIDArray[f]);
+		    }, counter * upcSearchDelay);
+		    counter++;
+        }
+    }
+    setTimeout(function(){
+    	logThis("Search completed");
+    }, (upcSearchDelay*totalSearches)+1500);
+}
+
+searchByKeywordFunc = function(kw, sstore){
+	addNameToSearchedUPCs = true;
+	            fetch(`proxy.php?query=${encodeURIComponent(kw)}&store=${sstore}`)
+	            
+                .then(response => response.json())
+                .then(data => searchResults = data.results)
+                .then(function() {
+                    for (z = 0; z < searchResults.length; z++) {
+                    	addData = "";
+                    	if (searchResults[z].productId.upc.length > 0){
+                        	if (!document.getElementById("upcs").value.includes(searchResults[z].productId.upc)) {
+                            	addData += validateUPC(searchResults[z].productId.upc);
+                            	if (addNameToSearchedUPCs){
+                        			addData += `-${searchResults[z].name.replace(/[^a-z0-9]/gi,'').substring(0, 20)}`;
+                        		}
+                        		document.getElementById("upcs").value +=  `${addData}\n`;
+                        	}
+                   		}
+                    }
+                });
+}
+
+createDateStamp = function(disableSpecial = false){
+	d = new Date();
+	s1 = "/";
+	s2 = ":";
+	s3 = " ";
+	if (disableSpecial){
+		s1 = "_";
+		s2 = "_";
+		s3 = "-";
+	}
+	return d.getMonth()+1 + s1 + d.getDate() + s1 + d.getFullYear() + s3 + d.getHours() + s2 + d.getMinutes() + s2 + d.getSeconds();
+}
+
+logThis = function(logThisText){
+	dateString = "[" + createDateStamp() + "]";
+	document.getElementById("log").value = dateString + " " + logThisText + "\n" + document.getElementById("log").value;
+}
+
+processData = function() {
+	document.getElementById("priceCheckOnlyItemInfo").innerHTML = "</br><h3 onclick='changePriceCheckStoreID()'>Loading.....</h3>";
+	document.getElementById("itemArea").innerHTML = "";
+	anyItemHasUpdated = false;
+    logThis("Scan started");
+    startButton = document.getElementById("startScan");
+    startButton.disabled = true;
+    startButton.classList.remove("btn-primary");
+    startButton.classList.add("btn-warning");
+    startButton.innerHTML = "Scanning.....";
+    document.getElementById("upcs").value = document.getElementById("upcs").value.replace(/(^[ \t]*\n)/gm, "");
+    upcs = document.getElementById("upcs").value.split("\n");
+    stores = document.getElementById("storelist").value.split("\n");
+    totalChecks = upcs.length * stores.length;
+    counter = 0;
+    actuallyRan = "0";
+    delay = 0;
+    storeTransitionDelay = mainStoreTransitionDelayInSeconds*1000;
+    for (let i = 0; i < stores.length; i++) {
+            for (let j = 0; j < upcs.length; j++) {
+    			delay = document.getElementById("interval").value * 1000;
+            	delay = delay * counter;
+            	delay = delay + (storeTransitionDelay*i);
+            	//delay += generateRandomIntegerInRange(3000, 8000);
+                setTimeout(function() {
+                    currentUPC = upcs[j].split("-")[0];
+                    currentUPCnote = upcs[j].split("-")[1];
+                    currentStore = stores[i].split("-")[0];
+                    currentStorenote = stores[i].split("-")[1];
+                    getProductData(currentUPC, currentStore);
+                    actuallyRan++;
+                    if (actuallyRan == totalChecks) {
+                        finished = true;
+                        if (document.getElementById("continuousMode").checked) {
+                            setTimeout(function() {
+                                processData();
+                            }, restartDelay)
+                        }
+						setTimeout(function(){
+                    		logThis("Scan completed");
+    						startButton.disabled = false;
+    						startButton.classList.remove("btn-warning");
+    						startButton.classList.add("btn-primary");
+    						startButton.innerHTML = "Start inventory scan";
+                   		}, 3000);
+                    }
+                }, delay);
+                counter++;
+            }
+    }
+}
+ function loadFile(filePath) {
+  var result = null;
+  var xmlhttp = new XMLHttpRequest();
+  xmlhttp.open("GET", filePath, false);
+  xmlhttp.send();
+  if (xmlhttp.status==200) {
+    result = xmlhttp.responseText;
+  }
+  return result;
+}
+
+addPriceToItem = function(upc, nprice, store, textColor){
+	if (!document.getElementById(`price_${store}_${currentUPC}`)){
+	document.getElementById(upc + "_stores").innerHTML += `
+	<div id="storeAndPrice_${store}_${currentUPC}"><p style="display:inline" class="store-text">
+	<a style="display:inline;">${clearanceIndic}</a><a alt="${itemStoreStatus}" style="display:inline;color:${itemTextColor}" href="https://www.walmart.com/store/${currentStore}">${store}</a>:<p style="display:inline" id="price_${store}_${currentUPC}"> ${nprice}</p></p></div>`;
+	} else {
+		//document.getElementById(`price_${store}_${currentUPC}`).innerHTML = "$" + itemPriceDisplay;
+		document.getElementById(`price_${store}_${currentUPC}`).innerHTML = " " + nprice;
+	}
+}
+
+
+parsePrice = function(parseThisPrice){
+	if (parseThisPrice != "N/A"){
+		finalParsedPrice = (parseThisPrice/100).toString();
+		if (!finalParsedPrice.includes(".")){
+			finalParsedPrice += ".00";
+		}
+		if (finalParsedPrice.split(".")[1].length == 1){
+			finalParsedPrice += "0";
+		}
+		finalParsedPrice = "$" + finalParsedPrice;
+		return finalParsedPrice;
+	} else {
+		return parseThisPrice;
+	}
+}
+function validateUPC(s){
+        s = s.toString();
+        let result = 0;
+        let i = 1;
+        for (let mmm = s.length-1; mmm >=0; mmm--){
+            result = result + parseInt(s.charAt(mmm)) * (1+(2*(i % 2)));
+            i++;
+        }
+        checkDigit = (10 - (result % 10)) % 10;
+        cr = s.toString() + checkDigit;
+        if (cr.length == 10){
+            cr = `00${cr}`;
+        } else if (cr.length == 11){
+            cr = `0${cr}`;
+        } else {
+            //nothing
+        }
+        return cr;
+    }
+
+processPart2 = function(){
+	anyItemHasUpdated = false;
+	currentProduct = fetchedData;
+	if (!currentUPCnote){
+		itemName = currentProduct.common.name;
+	} else {
+		itemName = currentUPCnote;
+	}
+	itemNameShort = itemName.replace(" ", "").replace("-", "").substring(0, 30);
+	itemNameShortNoSpaces = itemNameShort.replace(/ /g, '');
+	itemNameExtraShort = itemName.replace(/ /g, '').substring(0, 15);
+	if (document.getElementById("appendName").checked && !document.getElementById("upcs").value.includes(currentUPC+"-")){
+		document.getElementById("upcs").value = document.getElementById("upcs").value.replace(currentUPC, currentUPC + "-" + itemNameShortNoSpaces);
+	}
+	itemImgUrl = currentProduct.common.productImageUrl;
+	if (!itemImgUrl){
+		itemImgUrl = "https://aosa.org/wp-content/uploads/2019/04/image-placeholder-350x350.png";
+	}
+	itemProdUrl = currentProduct.common.productUrl;
+	itemStoreAvail = currentProduct.inStore.inventory;
+	itemStoreStatus = currentProduct.inStore.inventory.status;
+	if (itemStoreStatus == "In Stock"){
+		itemTextColor = "#228C22";
+		stockLevel = 3;
+	} else if (itemStoreStatus == "Limited Stock") {
+		itemTextColor = "#FFD700";
+		stockLevel = 2;
+	} else if (itemStoreStatus == "Out of Stock") {
+		itemTextColor = "#8E1600";
+		stockLevel = 1;
+	} else if (!itemStoreStatus){
+		itemStoreStatus = "Unknown";
+		itemTextColor = "black";
+		stockLevel = 0;
+	}
+	fullItemLocation = currentProduct.inStore.location;
+	isleLocations = "";
+	if (fullItemLocation){
+		for (u = 0; u < fullItemLocation.detailedAisles.length; u++){
+	   		isleLocations += `${fullItemLocation.detailedAisles[u].zoneName}${fullItemLocation.detailedAisles[u].aisleName}-${fullItemLocation.detailedAisles[u].sectionName},`;
+		}
+	}
+	if (isleLocations == ""){ isleLocations = "Not available"; }
+	itemPriceInCentsOnline = "N/A";
+	if (currentProduct.online != undefined){
+		itemPriceInCentsOnline = currentProduct.online.price.priceInCents;
+	}
+	itemPriceInCentsOnlineDisplay = parsePrice(itemPriceInCentsOnline);
+	itemPriceInCents = "none";
+	itemPriceInCents = currentProduct.inStore.price.priceInCents;
+	itemPrice = (itemPriceInCents/100);
+	itemPriceDisplay = parsePrice(itemPriceInCents);
+	missingPrice = false;
+	clearanceChance = false;
+	clearanceIndic = ``;
+	if (Number.isFinite(itemPriceInCents) && Number.isFinite(itemPriceInCentsOnline)){
+		if (itemPriceInCents < itemPriceInCentsOnline){
+			clearanceChance = true;
+			clearanceIndic = '⚠️';
+		}
+	}
+	if (!itemPrice) {
+		itemPrice = "N/A";
+		missingPrice = true;
+		itemPriceDisplay = "Not available"
+	}
+	storeDisplay = "store ID#" + currentStore;
+	storeDisplayShort = currentStore;
+	if (currentStorenote){
+		storeDisplay = currentStorenote;
+		storeDisplayShort = currentStorenote;
+	}
+	fullStoreID = currentStore;
+	if (currentStorenote != undefined){
+		fullStoreID = `${currentStorenote} (${currentStore})`;
+	} else {
+		fullStoreID = `${currentStore}`;
+	}
+	messageToLog = `
+	Item: ${itemName} `;
+	if (missingPrice){
+		//
+		messageToLog += `
+	No price or stock information available`;
+	} else {
+		itemPriceDisplay = parsePrice(itemPriceInCents);
+		//navigator.vibrate(500);
+		messageToLog += `
+	Price: ${itemPriceDisplay}
+	Store: ${fullStoreID}
+	Stock status: ${itemStoreStatus}`;
+	}
+	if (getUrlVars()["mode"] == "priceCheck"){
+		document.getElementById("priceCheckOnlyItemInfo").innerHTML = 
+		`<h3><a onclick="processData()">${itemName}</a></br></br>
+		
+		<div id="scannedItemContainer" style="text-align: center">
+		<div id="scannedItemInfo" style="display: inline-block; text-align: left;">
+		Price: ${itemPriceDisplay}</br>
+		Online: ${itemPriceInCentsOnlineDisplay}</br>
+		UPC: <a href="http://barcode.live/barcode.php?upc=${upc}">${upc}</a></br>
+		<p onclick="changePriceCheckStoreID()">Current store: ${currentStore}</br></p>
+		Item Location: ${isleLocations}</br>
+		Stock status: ${itemStoreStatus}</br></br>
+		<center>
+		<img src="${itemImgUrl}?odnHeight=150&odnWidth=150&odnBg=FFFFFF" onclick="changePriceCheckStoreID()"  style="max-width: 90%; max-height:200px"></br></br>
+		</div>
+		</div>`;
+		return;
+	}
+	if (!document.getElementById(currentUPC) && !missingPrice){
+		itemArea = document.getElementById("itemArea");
+		itemArea.innerHTML += `
+			<div  id="${currentUPC}" class="show-items grid-item">
+			<a href="${fetchedData.common.productUrl}"><img id="itemPic" style="max-width: 170px; max-height:170px" src="${itemImgUrl}"></a></br>
+			<img id="itemBarcode" width="150px" height="50px" src="http://barcode.live/barcode.php?upc=${currentUPC}">
+			<p class="in-stores-text">${currentUPC}</p>
+			<p display="font-size:8px">Online Price: ${itemPriceInCentsOnlineDisplay}</p></br>
+			<p id="itemTitle" class="item-title-text">${itemName}</p>
+			<div id="${currentUPC}_stores">
+		`;
+		if (!missingPrice){
+			addPriceToItem(currentUPC, itemPriceDisplay, fullStoreID, itemTextColor);
+		} else {
+				//nothing for now
+		}
+		itemArea.innerHTML += "</div></div>";
+	} else {
+		if (!missingPrice){
+			addPriceToItem(currentUPC, itemPriceDisplay, fullStoreID, itemTextColor);
+		}
+	}
+
+
+	dynamicPriceVariable = `oldPrice_${currentStore}_${currentUPC}`;
+	recordedPrice = window[dynamicPriceVariable];
+	logThis(messageToLog);
+	if (!recordedPrice && !missingPrice) {
+	    window[dynamicPriceVariable] = itemPriceInCents;
+   		logThis(`Created new item price record of item ${itemNameShort} in store ${storeDisplayShort}`)
+	} else if (window[dynamicPriceVariable] != itemPriceInCents) {
+	    if (Number.isFinite(itemPriceInCents)) {
+	        oldPrice = window[dynamicPriceVariable];
+	        if (sendPriceUpdateEmails) {
+	            addToUpdateEmail(itemName, itemImgUrl, currentUPC, fullStoreID, parsePrice(itemPriceInCents), parsePrice(oldPrice), true);
+	            logThis(`Sending email about price of ${itemNameShort}....`);
+	        }
+	    }
+	    window[dynamicPriceVariable] = itemPriceInCents;
+	}
+	
+
+	dynamicStockVariable = `oldStock_${currentStore}_${currentUPC}`;
+	recordedStock = window[dynamicStockVariable];
+	if (recordedStock){
+		oldStockPhrase = recordedStock.split("_")[0];
+		oldStockLevel = recordedStock.split("_")[1];
+	}
+	if (!recordedStock){
+		window[dynamicStockVariable] = `${itemStoreStatus}_${stockLevel}`;
+		logThis(`Created new item stock record of item ${itemNameShort} in store ${storeDisplayShort}`);
+	} else if (!window[dynamicStockVariable].includes(itemStoreStatus)){
+		if (stockLevel > oldStockLevel){
+			if (sendStockUpdateEmails){
+				addToUpdateEmail(itemName, itemImgUrl, currentUPC, fullStoreID, 0, 0, true, true, itemStoreStatus, oldStockPhrase);
+				logThis(`Sending email about stock of ${itemNameShort}....`);
+			}
+		}
+		window[dynamicStockVariable] = `${itemStoreStatus}_${stockLevel}`;
+	}
+	currentProduct = "";
+}
+
+
+
+
+</script>
